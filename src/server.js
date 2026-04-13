@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./db');
+const sessionRoutes = require('./routes/sessionRoutes');
 
 const app = express();
 
@@ -12,6 +13,9 @@ app.use(express.static('public'));
 
 // Connect to MongoDB
 connectDB();
+
+// Routes
+app.use('/api/sessions', sessionRoutes);
 
 // Test route
 app.get('/api/test', (req, res) => {

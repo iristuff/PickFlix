@@ -35,10 +35,13 @@ const sessionSchema = new mongoose.Schema({
         default: []
     },
     status: {
-        type: String,
-        enum: ['stepup', 'voting', 'completed'],
-        default: 'setup'
+    type: String,
+    enum: {
+      values: ['setup', 'voting', 'completed'],
+      message: '{VALUE} is not a valid status'
     },
+    default: 'setup'
+  },
     createdAt: {
         type: Date,
         default: Date.now,
