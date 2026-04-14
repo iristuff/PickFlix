@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const connectDB = require('./db');
 const sessionRoutes = require('./routes/sessionRoutes');
+const voteRoutes = require('./routes/voteRoutes');
+const movieRoutes = require('./routes/movieRoutes');
 
 const app = express();
 
@@ -16,6 +18,8 @@ connectDB();
 
 // Routes
 app.use('/api/sessions', sessionRoutes);
+app.use('/api/votes', voteRoutes);
+app.use('/api/movies', movieRoutes);
 
 // Test route
 app.get('/api/test', (req, res) => {
