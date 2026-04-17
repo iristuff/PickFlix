@@ -143,21 +143,40 @@
             .join("");
         }
 
-        async function load() {
+        async function load({ quiet = false } = {}) {
           showMsg(resultsError, "", "");
           notReady.classList.add("hidden");
-          setLoading(true);
+          if (!quiet) setLoading(true);
           try {
-            const [sessionData, resultsData] = await Promise.all([
-              apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`),
-              apiFetch(`/api/votes/${encodeURIComponent(sessionCode)}/results`),
-            ]);
-
+            const sessionData = await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`);
             const session = sessionData?.session;
             if (!session?.code) throw new Error("Session not found.");
+
             if (session.status !== "completed") {
-              // user might have navigated early; keep page friendly
               notReady.classList.remove("hidden");
+              winnerTitle.textContent = "—";
+              winnerPoints.textContent = "—";
+              winnerFirst.textContent = "—";
+              winnerSecond.textContent = "—";
+              winnerThird.textContent = "—";
+              winnerPoster.innerHTML = posterOrPlaceholder({ title: "…" });
+              tieBanner.classList.add("hidden");
+              voteCount.textContent = "—";
+              renderScoreboard([]);
+              return session.status || null;
+            }
+
+            let resultsData;
+            try {
+              resultsData = await apiFetch(`/api/votes/${encodeURIComponent(sessionCode)}/results`);
+            } catch (e) {
+              const msg = String(e?.message || "").toLowerCase();
+              if (msg.includes("no votes submitted")) {
+                notReady.classList.remove("hidden");
+                showMsg(resultsError, "", "");
+                return session.status || null;
+              }
+              throw e;
             }
 
             const moviesById = new Map((session.movies || []).map((m) => [String(m.tmdbId), normalizeMovie(m)]));
@@ -176,6 +195,7 @@
             tieBanner.classList.toggle("hidden", !resultsData?.tieBroken);
             voteCount.textContent = `${Number(resultsData?.totalVotes || 0)} votes`;
             renderScoreboard(resultsData?.results || []);
+            return session.status || null;
           } catch (e) {
             const msg = e?.message || "Failed to load results.";
             if (String(msg).toLowerCase().includes("no votes submitted")) {
@@ -184,20 +204,24 @@
             } else {
               showMsg(resultsError, msg, "error");
             }
+            return null;
           } finally {
-            setLoading(false);
+            if (!quiet) setLoading(false);
           }
         }
 
         let pollId = null;
         (async () => {
-          await load();
+          const initialStatus = await load({ quiet: false });
+          let lastStatus = initialStatus;
           pollId = window.setInterval(async () => {
             try {
               const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`);
-              if (data?.session?.status === "completed") {
-                await load();
+              const st = data?.session?.status;
+              if (st === "completed" && lastStatus !== "completed") {
+                await load({ quiet: true });
               }
+              if (st) lastStatus = st;
             } catch {
               // silent
             }

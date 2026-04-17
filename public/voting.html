@@ -122,7 +122,7 @@
 
         function posterOrPlaceholder(m) {
           if (m.posterUrl) {
-            return `<img src="${window.PickFlix.escapeHtml(m.posterUrl)}" alt="${window.PickFlix.escapeHtml(m.title)} poster" loading="lazy" />`;
+            return `<img src="${window.PickFlix.escapeHtml(m.posterUrl)}" alt="${window.PickFlix.escapeHtml(m.title)} poster" loading="lazy" decoding="async" />`;
           }
           const initials = (m.title || "Movie").split(" ").slice(0, 3).join(" ");
           return `<div>${window.PickFlix.escapeHtml(initials)}</div>`;
@@ -152,6 +152,19 @@
           submitBtn.disabled = submitted || !ranks[1];
         }
 
+        function syncRankVisuals() {
+          moviesEl.querySelectorAll("[data-movie]").forEach((el) => {
+            const movieId = el.getAttribute("data-movie");
+            const r = currentRankOf(movieId);
+            el.classList.toggle("selected", Boolean(r));
+            const chip = el.querySelector(".js-rank-chip");
+            if (chip) {
+              chip.textContent = r ? `Rank: ${r}` : "Tap to rank";
+              chip.classList.toggle("teal", Boolean(r));
+            }
+          });
+        }
+
         function renderMovies() {
           poolCount.textContent = `${movieList.length} movie${movieList.length === 1 ? "" : "s"}`;
           if (!movieList.length) {
@@ -160,10 +173,8 @@
           }
           moviesEl.innerHTML = movieList
             .map((m) => {
-              const r = currentRankOf(m.tmdbId);
-              const selectedClass = r ? "selected" : "";
               return `
-                <div class="card clickable ${selectedClass}" data-movie="${window.PickFlix.escapeHtml(String(m.tmdbId))}">
+                <div class="card clickable" data-movie="${window.PickFlix.escapeHtml(String(m.tmdbId))}">
                   <div class="card-inner">
                     <div class="movie-row" style="grid-template-columns: 64px 1fr;">
                       <div class="poster">${posterOrPlaceholder(m)}</div>
@@ -172,11 +183,7 @@
                         <div class="sub">
                           <span class="chip purple">Year: ${window.PickFlix.escapeHtml(m.year || "—")}</span>
                           <span class="chip yellow">Rating: ${window.PickFlix.escapeHtml(String(m.rating ?? "—"))}</span>
-                          ${
-                            r
-                              ? `<span class="chip teal">Rank: ${r}</span>`
-                              : `<span class="chip">Tap to rank</span>`
-                          }
+                          <span class="chip js-rank-chip">Tap to rank</span>
                         </div>
                       </div>
                     </div>
@@ -185,36 +192,41 @@
               `;
             })
             .join("");
-
-          moviesEl.querySelectorAll("[data-movie]").forEach((el) => {
-            el.addEventListener("click", () => {
-              if (submitted) return;
-              const movieId = el.getAttribute("data-movie");
-              const existing = currentRankOf(movieId);
-              if (existing) {
-                ranks[existing] = null;
-                toast(`Removed from rank ${existing}.`, "info");
-              } else {
-                const next = firstAvailableRank();
-                if (!next) {
-                  toast("All 3 ranking slots are filled. Tap one again to remove.", "info");
-                  return;
-                }
-                ranks[next] = movieId;
-                toast(`Assigned as #${next}.`, "success", { ms: 1200 });
-              }
-              updateSlots();
-              renderMovies();
-            });
-          });
+          syncRankVisuals();
         }
+
+        moviesEl.addEventListener("click", (e) => {
+          const card = e.target.closest("[data-movie]");
+          if (!card || submitted) return;
+          const movieId = card.getAttribute("data-movie");
+          const existing = currentRankOf(movieId);
+          if (existing) {
+            ranks[existing] = null;
+            toast(`Removed from rank ${existing}.`, "info", { ms: 1800 });
+          } else {
+            const next = firstAvailableRank();
+            if (!next) {
+              toast("All 3 ranking slots are filled. Tap one again to remove.", "info", { ms: 2200 });
+              return;
+            }
+            ranks[next] = movieId;
+          }
+          updateSlots();
+          syncRankVisuals();
+        });
 
         async function loadSession() {
           const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`);
           const session = data?.session;
           if (!session?.code) throw new Error("Session not found.");
-          if (session.status === "setup") navigate("/lobby.html");
-          if (session.status === "completed") navigate("/results.html");
+          if (session.status === "setup") {
+            navigate("/lobby.html");
+            return;
+          }
+          if (session.status === "completed") {
+            navigate("/results.html");
+            return;
+          }
           participantTotal = (session.participants || []).length;
           movieList = (session.movies || []).map(normalizeMovie);
           renderMovies();
@@ -270,9 +282,8 @@
           if (status === "setup") navigate("/lobby.html");
         }
 
-        // initial + polling
-        let pollVotesId = null;
-        let pollStatusId = null;
+        // initial + polling (single interval = fewer repaints + less network)
+        let pollId = null;
         (async () => {
           setLoading(true);
           try {
@@ -284,15 +295,9 @@
             setLoading(false);
           }
 
-          pollVotesId = window.setInterval(async () => {
+          pollId = window.setInterval(async () => {
             try {
               await refreshProgress();
-            } catch {
-              // silent
-            }
-          }, 3000);
-          pollStatusId = window.setInterval(async () => {
-            try {
               await checkStatus();
             } catch {
               // silent
@@ -300,8 +305,7 @@
           }, 3000);
 
           window.addEventListener("beforeunload", () => {
-            pollVotesId && window.clearInterval(pollVotesId);
-            pollStatusId && window.clearInterval(pollStatusId);
+            pollId && window.clearInterval(pollId);
           });
         })();
       })();

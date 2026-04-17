@@ -1,5 +1,20 @@
 /* PickFlix shared frontend utilities (vanilla JS) */
 (() => {
+  function resetBodyNavStyles() {
+    if (!document.body) return;
+    document.body.style.opacity = "";
+    document.body.style.transform = "";
+    document.body.style.transition = "";
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", resetBodyNavStyles);
+  } else {
+    resetBodyNavStyles();
+  }
+  window.addEventListener("pageshow", (ev) => {
+    if (ev.persisted) resetBodyNavStyles();
+  });
+
   const STORAGE_KEY = "pickflix";
 
   function safeJsonParse(str, fallback) {
@@ -191,11 +206,14 @@
   }
 
   function navigate(path) {
-    // quick fade-out before nav
-    document.body.style.opacity = "0";
+    document.body.style.transition = "opacity 0.2s ease, transform 0.2s ease";
+    requestAnimationFrame(() => {
+      document.body.style.opacity = "0";
+      document.body.style.transform = "translateY(6px)";
+    });
     window.setTimeout(() => {
       window.location.href = path;
-    }, 120);
+    }, 200);
   }
 
   window.PickFlix = {

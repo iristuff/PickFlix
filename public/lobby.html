@@ -117,6 +117,9 @@
         const resultsEl = qs("#results");
         const searchMsg = qs("#searchMsg");
 
+        let lastSearchMovies = [];
+        let lastSessionSnap = "";
+
         codeText.textContent = String(sessionCode).toUpperCase();
         hostControls.style.display = isHost ? "" : "none";
         waitingMsg.classList.toggle("hidden", isHost);
@@ -159,19 +162,20 @@
 
         function posterOrPlaceholder(m) {
           if (m.posterUrl) {
-            return `<img src="${window.PickFlix.escapeHtml(m.posterUrl)}" alt="${window.PickFlix.escapeHtml(m.title)} poster" loading="lazy" />`;
+            return `<img src="${window.PickFlix.escapeHtml(m.posterUrl)}" alt="${window.PickFlix.escapeHtml(m.title)} poster" loading="lazy" decoding="async" />`;
           }
           const initials = (m.title || "Movie").split(" ").slice(0, 3).join(" ");
           return `<div>${window.PickFlix.escapeHtml(initials)}</div>`;
         }
 
         function renderSearchResults(movies) {
+          lastSearchMovies = Array.isArray(movies) ? movies : [];
           resultsEl.innerHTML = "";
-          if (!movies?.length) {
+          if (!lastSearchMovies.length) {
             resultsEl.innerHTML = `<div class="muted small">No results yet. Try searching something iconic.</div>`;
             return;
           }
-          resultsEl.innerHTML = movies
+          resultsEl.innerHTML = lastSearchMovies
             .map((raw) => {
               const m = normalizeMovie(raw);
               return `
@@ -187,7 +191,7 @@
                         </div>
                       </div>
                       <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
-                        <button class="btn btn-primary btn-sm" data-add="${window.PickFlix.escapeHtml(String(m.tmdbId))}">Add to Pool</button>
+                        <button type="button" class="btn btn-primary btn-sm" data-add="${window.PickFlix.escapeHtml(String(m.tmdbId))}">Add to Pool</button>
                       </div>
                     </div>
                   </div>
@@ -195,28 +199,6 @@
               `;
             })
             .join("");
-
-          resultsEl.querySelectorAll("[data-add]").forEach((btn) => {
-            btn.addEventListener("click", async () => {
-              const id = btn.getAttribute("data-add");
-              const raw = movies.find((x) => String(x.tmdbId ?? x.tmdb_id ?? x.id) === String(id));
-              if (!raw) return;
-              setLoading(true);
-              showMsg(lobbyError, "", "");
-              try {
-                await apiFetch("/api/movies/add", {
-                  method: "POST",
-                  body: { sessionCode, username, movie: raw },
-                });
-                toast("Added to pool!", "success");
-                await refreshSession();
-              } catch (e) {
-                showMsg(lobbyError, e.message || "Failed to add movie.", "error");
-              } finally {
-                setLoading(false);
-              }
-            });
-          });
         }
 
         function renderPool(session) {
@@ -248,7 +230,7 @@
                       <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
                         ${
                           canRemove
-                            ? `<button class="btn btn-danger btn-sm" data-remove="${window.PickFlix.escapeHtml(String(m.tmdbId))}">Remove</button>`
+                            ? `<button type="button" class="btn btn-danger btn-sm" data-remove="${window.PickFlix.escapeHtml(String(m.tmdbId))}">Remove</button>`
                             : `<div class="muted small"> </div>`
                         }
                       </div>
@@ -258,36 +240,26 @@
               `;
             })
             .join("");
-
-          poolEl.querySelectorAll("[data-remove]").forEach((btn) => {
-            btn.addEventListener("click", async () => {
-              const tmdbId = btn.getAttribute("data-remove");
-              setLoading(true);
-              showMsg(lobbyError, "", "");
-              try {
-                await apiFetch("/api/movies/remove", {
-                  method: "DELETE",
-                  body: { sessionCode, username, tmdbId },
-                });
-                toast("Removed from pool.", "success");
-                await refreshSession();
-              } catch (e) {
-                showMsg(lobbyError, e.message || "Failed to remove movie.", "error");
-              } finally {
-                setLoading(false);
-              }
-            });
-          });
         }
 
         async function refreshSession() {
           const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`);
           const sessionData = data?.session || {};
+          const snap = JSON.stringify({
+            status: sessionData.status,
+            host: sessionData.host,
+            participants: sessionData.participants || [],
+            movies: (sessionData.movies || []).map((m) => `${m.tmdbId}:${m.addedBy || ""}`),
+          });
+
           hostPill.textContent = `Host: ${sessionData.host || "—"}`;
           phasePill.textContent = (sessionData.status || "setup").toString();
 
-          renderParticipants(sessionData);
-          renderPool(sessionData);
+          if (snap !== lastSessionSnap) {
+            lastSessionSnap = snap;
+            renderParticipants(sessionData);
+            renderPool(sessionData);
+          }
 
           if (sessionData.status === "voting") {
             navigate("/voting.html");
@@ -304,7 +276,8 @@
             return;
           }
           showMsg(searchMsg, "", "");
-          setLoading(true);
+          searchBtn.classList.add("is-busy");
+          searchBtn.disabled = true;
           try {
             const data = await apiFetch("/api/movies/search", {
               method: "POST",
@@ -314,13 +287,60 @@
           } catch (e) {
             showMsg(searchMsg, e.message || "Search failed.", "error");
           } finally {
-            setLoading(false);
+            searchBtn.classList.remove("is-busy");
+            searchBtn.disabled = false;
           }
         }
 
         searchBtn.addEventListener("click", search);
         queryEl.addEventListener("keydown", (ev) => {
           if (ev.key === "Enter") search();
+        });
+
+        resultsEl.addEventListener("click", async (e) => {
+          const btn = e.target.closest("[data-add]");
+          if (!btn) return;
+          const id = btn.getAttribute("data-add");
+          const raw = lastSearchMovies.find((x) => String(x.tmdbId ?? x.tmdb_id ?? x.id) === String(id));
+          if (!raw) return;
+          showMsg(lobbyError, "", "");
+          btn.classList.add("is-busy");
+          btn.disabled = true;
+          try {
+            await apiFetch("/api/movies/add", {
+              method: "POST",
+              body: { sessionCode, username, movie: raw },
+            });
+            toast("Added to pool!", "success");
+            await refreshSession();
+          } catch (err) {
+            showMsg(lobbyError, err.message || "Failed to add movie.", "error");
+          } finally {
+            btn.classList.remove("is-busy");
+            btn.disabled = false;
+          }
+        });
+
+        poolEl.addEventListener("click", async (e) => {
+          const btn = e.target.closest("[data-remove]");
+          if (!btn) return;
+          const tmdbId = btn.getAttribute("data-remove");
+          showMsg(lobbyError, "", "");
+          btn.classList.add("is-busy");
+          btn.disabled = true;
+          try {
+            await apiFetch("/api/movies/remove", {
+              method: "DELETE",
+              body: { sessionCode, username, tmdbId },
+            });
+            toast("Removed from pool.", "success");
+            await refreshSession();
+          } catch (err) {
+            showMsg(lobbyError, err.message || "Failed to remove movie.", "error");
+          } finally {
+            btn.classList.remove("is-busy");
+            btn.disabled = false;
+          }
         });
 
         qs("#startVotingBtn")?.addEventListener("click", async () => {
