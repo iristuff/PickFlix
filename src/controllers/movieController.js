@@ -1,6 +1,18 @@
 const axios = require('axios');
 const Session = require('../models/Session');
 
+function buildTmdbAuth() {
+  const raw = (process.env.TMDB_API_KEY || '').trim();
+  // TMDB v3 API key is typically a 32-char hex string.
+  const looksLikeV3Key = /^[a-f0-9]{32}$/i.test(raw);
+  if (!raw) return { headers: {}, params: {} };
+  if (looksLikeV3Key) {
+    return { headers: {}, params: { api_key: raw } };
+  }
+  // Otherwise assume it's a v4 Read Access Token (Bearer).
+  return { headers: { Authorization: `Bearer ${raw}` }, params: {} };
+}
+
 // SEARCH MOVIES VIA TMDB
 // POST /api/movies/search
 const searchMovies = async (req, res) => {
@@ -11,14 +23,20 @@ const searchMovies = async (req, res) => {
       return res.status(400).json({ error: 'Search query is required' });
     }
 
+    const auth = buildTmdbAuth();
+    if (!process.env.TMDB_API_KEY || !String(process.env.TMDB_API_KEY).trim()) {
+      return res.status(500).json({
+        error: 'TMDB_API_KEY is not set on the server'
+      });
+    }
+
     // Call TMDB API
     const response = await axios.get(
       'https://api.themoviedb.org/3/search/movie',
       {
-        headers: {
-          Authorization: `Bearer ${process.env.TMDB_API_KEY}`
-        },
+        headers: auth.headers,
         params: {
+          ...auth.params,
           query,
           include_adult: false,
           language: 'en-US',
@@ -48,8 +66,15 @@ const searchMovies = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('searchMovies error:', error.message);
-    res.status(500).json({ error: error.message });
+    const status = error?.response?.status || 500;
+    const tmdbMsg =
+      error?.response?.data?.status_message ||
+      error?.response?.data?.status_message?.toString?.() ||
+      error?.message;
+    console.error('searchMovies error:', tmdbMsg);
+    res.status(status >= 400 && status < 600 ? status : 500).json({
+      error: tmdbMsg || 'TMDB request failed'
+    });
   }
 };
 
