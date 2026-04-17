@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PickFlix — Results</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="page">
+    <div class="container">
+      <div class="topbar">
+        <div class="logo" aria-label="PickFlix">
+          <div class="logo-mark" aria-hidden="true"></div>
+          <div class="logo-text">Results</div>
+        </div>
+        <div class="badge">
+          Code:
+          <span id="codeText" class="mono" style="font-weight: 900; letter-spacing: 0.12em">—</span>
+        </div>
+      </div>
+
+      <div id="tieBanner" class="msg hidden" style="border-color: rgba(255,230,109,.28); color: rgba(255,230,109,1); background: rgba(255,230,109,.06);">
+        Tie broken by number of 1st place votes
+      </div>
+
+      <div style="height: 12px"></div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <h2 style="margin-bottom: 12px">🎬 Tonight’s Pick!</h2>
+
+          <div class="winner">
+            <div class="winner-poster" id="winnerPoster"></div>
+            <div>
+              <div class="muted small">Winner</div>
+              <h1 id="winnerTitle" style="margin-top: 6px">—</h1>
+              <div class="sub" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;">
+                <span class="chip teal">Total points: <span id="winnerPoints">—</span></span>
+                <span class="chip purple">1st: <span id="winnerFirst">—</span></span>
+                <span class="chip yellow">2nd: <span id="winnerSecond">—</span></span>
+                <span class="chip">3rd: <span id="winnerThird">—</span></span>
+              </div>
+
+              <div id="resultsError" class="msg error hidden" role="alert"></div>
+              <div id="notReady" class="msg hidden" style="border-color: rgba(255,255,255,.12); color: rgba(255,255,255,.86);">
+                Results aren’t ready yet. Waiting for host to complete voting...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="height: 14px"></div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <div class="section-title">
+            <h2>Scoreboard</h2>
+            <div id="voteCount" class="pill small">— votes</div>
+          </div>
+
+          <div style="overflow:auto">
+            <table class="table" aria-label="Scoreboard">
+              <thead>
+                <tr>
+                  <th style="width: 80px">Rank</th>
+                  <th>Movie</th>
+                  <th style="width: 110px">Points</th>
+                  <th style="width: 70px">1st</th>
+                  <th style="width: 70px">2nd</th>
+                  <th style="width: 70px">3rd</th>
+                </tr>
+              </thead>
+              <tbody id="scoreRows"></tbody>
+            </table>
+          </div>
+
+          <div style="height: 14px"></div>
+
+          <div class="btns" id="hostNewSessionWrap" style="justify-content: flex-end">
+            <button id="newSessionBtn" class="btn btn-primary" type="button">New Session</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+      (function () {
+        const { qs, apiFetch, setLoading, showMsg, normalizeMovie, requireSession, navigate } = window.PickFlix;
+
+        const { sessionCode, isHost } = requireSession();
+
+        const codeText = qs("#codeText");
+        const tieBanner = qs("#tieBanner");
+        const winnerPoster = qs("#winnerPoster");
+        const winnerTitle = qs("#winnerTitle");
+        const winnerPoints = qs("#winnerPoints");
+        const winnerFirst = qs("#winnerFirst");
+        const winnerSecond = qs("#winnerSecond");
+        const winnerThird = qs("#winnerThird");
+        const voteCount = qs("#voteCount");
+        const scoreRows = qs("#scoreRows");
+        const resultsError = qs("#resultsError");
+        const notReady = qs("#notReady");
+        const hostWrap = qs("#hostNewSessionWrap");
+
+        codeText.textContent = String(sessionCode).toUpperCase();
+        hostWrap.style.display = isHost ? "" : "none";
+        qs("#newSessionBtn")?.addEventListener("click", () => navigate("/index.html"));
+
+        function posterOrPlaceholder(m) {
+          if (m?.posterUrl) {
+            return `<img src="${window.PickFlix.escapeHtml(m.posterUrl)}" alt="${window.PickFlix.escapeHtml(m.title)} poster" />`;
+          }
+          return `<div class="poster" style="width:100%;height:100%;border:none;border-radius:0;background:rgba(26,26,46,.55);display:flex;align-items:center;justify-content:center;padding:18px;font-weight:900;">${window.PickFlix.escapeHtml(
+            m?.title || "Movie"
+          )}</div>`;
+        }
+
+        function renderScoreboard(results) {
+          scoreRows.innerHTML = (results || [])
+            .map((r, idx) => {
+              return `
+                <tr>
+                  <td>${idx + 1}</td>
+                  <td>${window.PickFlix.escapeHtml(r.title || "Untitled")}</td>
+                  <td>${Number(r.points || 0)}</td>
+                  <td>${Number(r.first || 0)}</td>
+                  <td>${Number(r.second || 0)}</td>
+                  <td>${Number(r.third || 0)}</td>
+                </tr>
+              `;
+            })
+            .join("");
+        }
+
+        async function load() {
+          showMsg(resultsError, "", "");
+          notReady.classList.add("hidden");
+          setLoading(true);
+          try {
+            const [sessionData, resultsData] = await Promise.all([
+              apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`),
+              apiFetch(`/api/votes/${encodeURIComponent(sessionCode)}/results`),
+            ]);
+
+            const session = sessionData?.session;
+            if (!session?.code) throw new Error("Session not found.");
+            if (session.status !== "completed") {
+              // user might have navigated early; keep page friendly
+              notReady.classList.remove("hidden");
+            }
+
+            const moviesById = new Map((session.movies || []).map((m) => [String(m.tmdbId), normalizeMovie(m)]));
+
+            const winner = resultsData?.winner;
+            const winnerMovie = winner?.movieId ? moviesById.get(String(winner.movieId)) : null;
+
+            winnerTitle.textContent = winner?.title || winnerMovie?.title || "—";
+            winnerPoints.textContent = winner?.points ?? "—";
+            winnerFirst.textContent = winner?.first ?? "—";
+            winnerSecond.textContent = winner?.second ?? "—";
+            winnerThird.textContent = winner?.third ?? "—";
+
+            winnerPoster.innerHTML = posterOrPlaceholder(winnerMovie || { title: winnerTitle.textContent });
+
+            tieBanner.classList.toggle("hidden", !resultsData?.tieBroken);
+            voteCount.textContent = `${Number(resultsData?.totalVotes || 0)} votes`;
+            renderScoreboard(resultsData?.results || []);
+          } catch (e) {
+            const msg = e?.message || "Failed to load results.";
+            if (String(msg).toLowerCase().includes("no votes submitted")) {
+              notReady.classList.remove("hidden");
+              showMsg(resultsError, "", "");
+            } else {
+              showMsg(resultsError, msg, "error");
+            }
+          } finally {
+            setLoading(false);
+          }
+        }
+
+        let pollId = null;
+        (async () => {
+          await load();
+          pollId = window.setInterval(async () => {
+            try {
+              const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`);
+              if (data?.session?.status === "completed") {
+                await load();
+              }
+            } catch {
+              // silent
+            }
+          }, 3000);
+          window.addEventListener("beforeunload", () => pollId && window.clearInterval(pollId));
+        })();
+      })();
+    </script>
+  </body>
+</html>
+

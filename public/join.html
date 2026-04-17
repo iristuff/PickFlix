@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PickFlix — Join Session</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="page">
+    <div class="container">
+      <div class="topbar">
+        <a class="pill" href="/index.html" aria-label="Back to home">← Back</a>
+        <div class="logo" aria-label="PickFlix">
+          <div class="logo-text">Join</div>
+        </div>
+        <div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <h2>Enter your session code</h2>
+          <p class="small">6 characters. We’ll auto-uppercase it.</p>
+
+          <div style="height: 14px"></div>
+
+          <div class="label">Session Code</div>
+          <input id="code" class="input mono" placeholder="ABC123" inputmode="text" autocomplete="off" maxlength="6" />
+
+          <div style="height: 12px"></div>
+
+          <div class="label">Username</div>
+          <input id="username" class="input" placeholder="e.g. irisle" autocomplete="nickname" />
+
+          <div style="height: 14px"></div>
+
+          <button id="joinBtn" class="btn btn-primary" type="button" style="width: 100%">
+            Join
+          </button>
+
+          <div id="error" class="msg error hidden" role="alert"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+      (function () {
+        const { qs, apiFetch, setLoading, showMsg, saveSession, navigate, toUpper6 } = window.PickFlix;
+
+        const codeEl = qs("#code");
+        const usernameEl = qs("#username");
+        const joinBtn = qs("#joinBtn");
+        const errorEl = qs("#error");
+
+        toUpper6(codeEl);
+        codeEl.focus();
+
+        function code() {
+          return (codeEl.value || "").trim().toUpperCase();
+        }
+        function username() {
+          return (usernameEl.value || "").trim();
+        }
+
+        async function joinSession() {
+          const c = code();
+          const u = username();
+          if (c.length !== 6) {
+            showMsg(errorEl, "Session code must be 6 characters.", "error");
+            codeEl.focus();
+            return;
+          }
+          if (!u) {
+            showMsg(errorEl, "Username is required.", "error");
+            usernameEl.focus();
+            return;
+          }
+
+          showMsg(errorEl, "", "");
+          setLoading(true);
+          try {
+            await apiFetch("/api/sessions/join", {
+              method: "POST",
+              body: { code: c, username: u },
+            });
+            saveSession({ sessionCode: c, username: u, isHost: false });
+            navigate("/lobby.html");
+          } catch (e) {
+            showMsg(errorEl, e.message || "Failed to join session.", "error");
+          } finally {
+            setLoading(false);
+          }
+        }
+
+        joinBtn.addEventListener("click", joinSession);
+        [codeEl, usernameEl].forEach((el) =>
+          el.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter") joinSession();
+          })
+        );
+      })();
+    </script>
+  </body>
+</html>
+

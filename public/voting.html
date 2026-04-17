@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PickFlix — Voting</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="page">
+    <div class="container">
+      <div class="topbar">
+        <div class="logo" aria-label="PickFlix">
+          <div class="logo-mark" aria-hidden="true"></div>
+          <div class="logo-text">Voting</div>
+        </div>
+        <div class="badge">
+          Code:
+          <span id="codeText" class="mono" style="font-weight: 900; letter-spacing: 0.12em">—</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <div class="section-title">
+            <h2>Rank your top 3</h2>
+            <div class="pill small"><span class="muted">Tap a movie</span></div>
+          </div>
+
+          <div class="rank-slots">
+            <div class="slot">
+              <div class="slot-title">1st Choice</div>
+              <div id="slot1" class="slot-value">—</div>
+            </div>
+            <div class="slot">
+              <div class="slot-title">2nd Choice</div>
+              <div id="slot2" class="slot-value">—</div>
+            </div>
+            <div class="slot">
+              <div class="slot-title">3rd Choice</div>
+              <div id="slot3" class="slot-value">—</div>
+            </div>
+          </div>
+
+          <div class="section-title">
+            <div>
+              <div style="font-weight: 900">Vote progress</div>
+              <div id="progressText" class="muted small">—</div>
+            </div>
+            <button id="submitBtn" class="btn btn-teal" type="button" disabled>Submit Vote</button>
+          </div>
+          <div class="progress" aria-label="Vote progress">
+            <div id="progressBar"></div>
+          </div>
+
+          <div id="afterSubmit" class="msg success hidden">Vote submitted! Waiting for others...</div>
+          <div id="voteError" class="msg error hidden" role="alert"></div>
+        </div>
+      </div>
+
+      <div style="height: 14px"></div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <div class="section-title">
+            <h2>Movie Pool</h2>
+            <div class="pill small" id="poolCount">0 movies</div>
+          </div>
+          <div id="movies" class="movie-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+      (function () {
+        const {
+          qs,
+          apiFetch,
+          setLoading,
+          toast,
+          showMsg,
+          normalizeMovie,
+          requireSession,
+          navigate,
+        } = window.PickFlix;
+
+        const { sessionCode, username } = requireSession();
+
+        const codeText = qs("#codeText");
+        const poolCount = qs("#poolCount");
+        const moviesEl = qs("#movies");
+        const voteError = qs("#voteError");
+        const afterSubmit = qs("#afterSubmit");
+        const submitBtn = qs("#submitBtn");
+
+        const slot1 = qs("#slot1");
+        const slot2 = qs("#slot2");
+        const slot3 = qs("#slot3");
+        const progressText = qs("#progressText");
+        const progressBar = qs("#progressBar");
+
+        codeText.textContent = String(sessionCode).toUpperCase();
+
+        let participantTotal = 0;
+        let movieList = [];
+        let submitted = false;
+
+        // rank -> movieId
+        const ranks = { 1: null, 2: null, 3: null };
+
+        function findMovie(movieId) {
+          return movieList.find((m) => String(m.tmdbId) === String(movieId));
+        }
+
+        function posterOrPlaceholder(m) {
+          if (m.posterUrl) {
+            return `<img src="${window.PickFlix.escapeHtml(m.posterUrl)}" alt="${window.PickFlix.escapeHtml(m.title)} poster" loading="lazy" />`;
+          }
+          const initials = (m.title || "Movie").split(" ").slice(0, 3).join(" ");
+          return `<div>${window.PickFlix.escapeHtml(initials)}</div>`;
+        }
+
+        function currentRankOf(movieId) {
+          for (const r of [1, 2, 3]) {
+            if (String(ranks[r] || "") === String(movieId)) return r;
+          }
+          return null;
+        }
+
+        function firstAvailableRank() {
+          for (const r of [1, 2, 3]) {
+            if (!ranks[r]) return r;
+          }
+          return null;
+        }
+
+        function updateSlots() {
+          const m1 = ranks[1] ? findMovie(ranks[1]) : null;
+          const m2 = ranks[2] ? findMovie(ranks[2]) : null;
+          const m3 = ranks[3] ? findMovie(ranks[3]) : null;
+          slot1.textContent = m1 ? m1.title : "—";
+          slot2.textContent = m2 ? m2.title : "—";
+          slot3.textContent = m3 ? m3.title : "—";
+          submitBtn.disabled = submitted || !ranks[1];
+        }
+
+        function renderMovies() {
+          poolCount.textContent = `${movieList.length} movie${movieList.length === 1 ? "" : "s"}`;
+          if (!movieList.length) {
+            moviesEl.innerHTML = `<div class="muted small">No movies in the pool.</div>`;
+            return;
+          }
+          moviesEl.innerHTML = movieList
+            .map((m) => {
+              const r = currentRankOf(m.tmdbId);
+              const selectedClass = r ? "selected" : "";
+              return `
+                <div class="card clickable ${selectedClass}" data-movie="${window.PickFlix.escapeHtml(String(m.tmdbId))}">
+                  <div class="card-inner">
+                    <div class="movie-row" style="grid-template-columns: 64px 1fr;">
+                      <div class="poster">${posterOrPlaceholder(m)}</div>
+                      <div class="movie-meta">
+                        <h3>${window.PickFlix.escapeHtml(m.title)}</h3>
+                        <div class="sub">
+                          <span class="chip purple">Year: ${window.PickFlix.escapeHtml(m.year || "—")}</span>
+                          <span class="chip yellow">Rating: ${window.PickFlix.escapeHtml(String(m.rating ?? "—"))}</span>
+                          ${
+                            r
+                              ? `<span class="chip teal">Rank: ${r}</span>`
+                              : `<span class="chip">Tap to rank</span>`
+                          }
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+
+          moviesEl.querySelectorAll("[data-movie]").forEach((el) => {
+            el.addEventListener("click", () => {
+              if (submitted) return;
+              const movieId = el.getAttribute("data-movie");
+              const existing = currentRankOf(movieId);
+              if (existing) {
+                ranks[existing] = null;
+                toast(`Removed from rank ${existing}.`, "info");
+              } else {
+                const next = firstAvailableRank();
+                if (!next) {
+                  toast("All 3 ranking slots are filled. Tap one again to remove.", "info");
+                  return;
+                }
+                ranks[next] = movieId;
+                toast(`Assigned as #${next}.`, "success", { ms: 1200 });
+              }
+              updateSlots();
+              renderMovies();
+            });
+          });
+        }
+
+        async function loadSession() {
+          const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`);
+          const session = data?.session;
+          if (!session?.code) throw new Error("Session not found.");
+          if (session.status === "setup") navigate("/lobby.html");
+          if (session.status === "completed") navigate("/results.html");
+          participantTotal = (session.participants || []).length;
+          movieList = (session.movies || []).map(normalizeMovie);
+          renderMovies();
+          updateSlots();
+        }
+
+        async function submitVote() {
+          showMsg(voteError, "", "");
+          if (!ranks[1]) return;
+          const rankingPayload = [];
+          for (const r of [1, 2, 3]) {
+            const movieId = ranks[r];
+            if (!movieId) continue;
+            const m = findMovie(movieId);
+            rankingPayload.push({
+              movieId: String(movieId),
+              title: m?.title || "Untitled",
+              rank: r,
+            });
+          }
+          setLoading(true);
+          try {
+            await apiFetch("/api/votes/submit", {
+              method: "POST",
+              body: { sessionCode, username, rankings: rankingPayload },
+            });
+            submitted = true;
+            afterSubmit.classList.remove("hidden");
+            submitBtn.disabled = true;
+            toast("Vote submitted!", "success");
+          } catch (e) {
+            showMsg(voteError, e.message || "Failed to submit vote.", "error");
+          } finally {
+            setLoading(false);
+          }
+        }
+
+        submitBtn.addEventListener("click", submitVote);
+
+        async function refreshProgress() {
+          const votes = await apiFetch(`/api/votes/${encodeURIComponent(sessionCode)}`);
+          const totalVotes = Number(votes?.totalVotes || 0);
+          const totalParticipants = Math.max(1, Number(participantTotal || 0));
+          const pct = Math.max(0, Math.min(100, Math.round((totalVotes / totalParticipants) * 100)));
+          progressText.textContent = `${totalVotes} of ${participantTotal || "—"} participants voted`;
+          progressBar.style.width = `${pct}%`;
+        }
+
+        async function checkStatus() {
+          const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`);
+          const status = data?.session?.status;
+          if (status === "completed") navigate("/results.html");
+          if (status === "setup") navigate("/lobby.html");
+        }
+
+        // initial + polling
+        let pollVotesId = null;
+        let pollStatusId = null;
+        (async () => {
+          setLoading(true);
+          try {
+            await loadSession();
+            await refreshProgress();
+          } catch (e) {
+            showMsg(voteError, e.message || "Failed to load voting page.", "error");
+          } finally {
+            setLoading(false);
+          }
+
+          pollVotesId = window.setInterval(async () => {
+            try {
+              await refreshProgress();
+            } catch {
+              // silent
+            }
+          }, 3000);
+          pollStatusId = window.setInterval(async () => {
+            try {
+              await checkStatus();
+            } catch {
+              // silent
+            }
+          }, 3000);
+
+          window.addEventListener("beforeunload", () => {
+            pollVotesId && window.clearInterval(pollVotesId);
+            pollStatusId && window.clearInterval(pollStatusId);
+          });
+        })();
+      })();
+    </script>
+  </body>
+</html>
+

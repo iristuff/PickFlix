@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PickFlix — Lobby</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="page">
+    <div class="container">
+      <div class="topbar">
+        <div class="logo" aria-label="PickFlix">
+          <div class="logo-mark" aria-hidden="true"></div>
+          <div class="logo-text">Lobby</div>
+        </div>
+        <div class="badge">
+          Code:
+          <span id="codeText" class="mono" style="font-weight: 900; letter-spacing: 0.12em">—</span>
+          <button id="copyBtn" class="btn btn-outline btn-sm" type="button">Copy</button>
+        </div>
+      </div>
+
+      <div class="grid two">
+        <div class="panel">
+          <div class="panel-inner">
+            <div class="section-title">
+              <h2>Participants</h2>
+              <div class="pill small" id="hostPill">Host: —</div>
+            </div>
+            <div id="participants" class="list"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-inner">
+            <div class="section-title">
+              <h2>Movie Search</h2>
+              <div class="pill small" id="phasePill">Setup</div>
+            </div>
+
+            <div class="form-row inline">
+              <input id="query" class="input" placeholder="Search movies (title, year…)" />
+              <button id="searchBtn" class="btn btn-primary" type="button" style="white-space: nowrap">
+                Search
+              </button>
+            </div>
+
+            <div id="searchMsg" class="msg hidden"></div>
+            <div style="height: 10px"></div>
+            <div id="results" class="list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="height: 14px"></div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <div class="section-title">
+            <h2>Shared Movie Pool</h2>
+            <div class="pill small" id="poolCount">0 movies</div>
+          </div>
+
+          <div id="pool" class="movie-grid"></div>
+
+          <div style="height: 14px"></div>
+
+          <div id="hostControls" class="btns" style="align-items: center; justify-content: flex-end">
+            <button id="startVotingBtn" class="btn btn-teal" type="button">
+              Start Voting
+            </button>
+          </div>
+
+          <div id="waitingMsg" class="msg hidden success">Waiting for host to start voting...</div>
+          <div id="lobbyError" class="msg error hidden" role="alert"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+      (function () {
+        const {
+          qs,
+          apiFetch,
+          setLoading,
+          toast,
+          showMsg,
+          normalizeMovie,
+          requireSession,
+          navigate,
+        } = window.PickFlix;
+
+        const { sessionCode, username, isHost } = requireSession();
+
+        const codeText = qs("#codeText");
+        const copyBtn = qs("#copyBtn");
+        const participantsEl = qs("#participants");
+        const hostPill = qs("#hostPill");
+        const phasePill = qs("#phasePill");
+        const poolCount = qs("#poolCount");
+        const poolEl = qs("#pool");
+        const hostControls = qs("#hostControls");
+        const waitingMsg = qs("#waitingMsg");
+        const lobbyError = qs("#lobbyError");
+
+        const queryEl = qs("#query");
+        const searchBtn = qs("#searchBtn");
+        const resultsEl = qs("#results");
+        const searchMsg = qs("#searchMsg");
+
+        codeText.textContent = String(sessionCode).toUpperCase();
+        hostControls.style.display = isHost ? "" : "none";
+        waitingMsg.classList.toggle("hidden", isHost);
+
+        copyBtn.addEventListener("click", async () => {
+          const text = String(sessionCode).toUpperCase();
+          try {
+            await navigator.clipboard.writeText(text);
+            toast("Copied session code!", "success");
+          } catch {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+            toast("Copied session code!", "success");
+          }
+        });
+
+        function renderParticipants(session) {
+          const participants = session?.participants || [];
+          participantsEl.innerHTML = participants
+            .map((p) => {
+              const me = p === username;
+              return `
+                <div class="card">
+                  <div class="card-inner" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                    <div style="font-weight:900">${window.PickFlix.escapeHtml(p)}${me ? ' <span class="kbd">you</span>' : ""}</div>
+                    <div class="muted small">${p === session.host ? "host" : ""}</div>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+          if (!participants.length) {
+            participantsEl.innerHTML = `<div class="muted small">No one here yet…</div>`;
+          }
+        }
+
+        function posterOrPlaceholder(m) {
+          if (m.posterUrl) {
+            return `<img src="${window.PickFlix.escapeHtml(m.posterUrl)}" alt="${window.PickFlix.escapeHtml(m.title)} poster" loading="lazy" />`;
+          }
+          const initials = (m.title || "Movie").split(" ").slice(0, 3).join(" ");
+          return `<div>${window.PickFlix.escapeHtml(initials)}</div>`;
+        }
+
+        function renderSearchResults(movies) {
+          resultsEl.innerHTML = "";
+          if (!movies?.length) {
+            resultsEl.innerHTML = `<div class="muted small">No results yet. Try searching something iconic.</div>`;
+            return;
+          }
+          resultsEl.innerHTML = movies
+            .map((raw) => {
+              const m = normalizeMovie(raw);
+              return `
+                <div class="card">
+                  <div class="card-inner">
+                    <div class="movie-row">
+                      <div class="poster">${posterOrPlaceholder(m)}</div>
+                      <div class="movie-meta">
+                        <h3>${window.PickFlix.escapeHtml(m.title)}</h3>
+                        <div class="sub">
+                          <span class="chip purple">Year: ${window.PickFlix.escapeHtml(m.year || "—")}</span>
+                          <span class="chip yellow">Rating: ${window.PickFlix.escapeHtml(String(m.rating ?? "—"))}</span>
+                        </div>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+                        <button class="btn btn-primary btn-sm" data-add="${window.PickFlix.escapeHtml(String(m.tmdbId))}">Add to Pool</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+
+          resultsEl.querySelectorAll("[data-add]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+              const id = btn.getAttribute("data-add");
+              const raw = movies.find((x) => String(x.tmdbId ?? x.tmdb_id ?? x.id) === String(id));
+              if (!raw) return;
+              setLoading(true);
+              showMsg(lobbyError, "", "");
+              try {
+                await apiFetch("/api/movies/add", {
+                  method: "POST",
+                  body: { sessionCode, username, movie: raw },
+                });
+                toast("Added to pool!", "success");
+                await refreshSession();
+              } catch (e) {
+                showMsg(lobbyError, e.message || "Failed to add movie.", "error");
+              } finally {
+                setLoading(false);
+              }
+            });
+          });
+        }
+
+        function renderPool(session) {
+          const movies = session?.movies || [];
+          poolCount.textContent = `${movies.length} movie${movies.length === 1 ? "" : "s"}`;
+          poolEl.innerHTML = "";
+          if (!movies.length) {
+            poolEl.innerHTML = `<div class="muted small">No movies yet — start adding!</div>`;
+            return;
+          }
+
+          poolEl.innerHTML = movies
+            .map((raw) => {
+              const m = normalizeMovie(raw);
+              const canRemove = String(m.addedBy || "") === String(username);
+              return `
+                <div class="card">
+                  <div class="card-inner">
+                    <div class="movie-row">
+                      <div class="poster">${posterOrPlaceholder(m)}</div>
+                      <div class="movie-meta">
+                        <h3>${window.PickFlix.escapeHtml(m.title)}</h3>
+                        <div class="sub">
+                          <span class="chip purple">Year: ${window.PickFlix.escapeHtml(m.year || "—")}</span>
+                          <span class="chip yellow">Rating: ${window.PickFlix.escapeHtml(String(m.rating ?? "—"))}</span>
+                          <span class="chip teal">Added by: ${window.PickFlix.escapeHtml(m.addedBy || "—")}</span>
+                        </div>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+                        ${
+                          canRemove
+                            ? `<button class="btn btn-danger btn-sm" data-remove="${window.PickFlix.escapeHtml(String(m.tmdbId))}">Remove</button>`
+                            : `<div class="muted small"> </div>`
+                        }
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+
+          poolEl.querySelectorAll("[data-remove]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+              const tmdbId = btn.getAttribute("data-remove");
+              setLoading(true);
+              showMsg(lobbyError, "", "");
+              try {
+                await apiFetch("/api/movies/remove", {
+                  method: "DELETE",
+                  body: { sessionCode, username, tmdbId },
+                });
+                toast("Removed from pool.", "success");
+                await refreshSession();
+              } catch (e) {
+                showMsg(lobbyError, e.message || "Failed to remove movie.", "error");
+              } finally {
+                setLoading(false);
+              }
+            });
+          });
+        }
+
+        async function refreshSession() {
+          const data = await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}`);
+          const sessionData = data?.session || {};
+          hostPill.textContent = `Host: ${sessionData.host || "—"}`;
+          phasePill.textContent = (sessionData.status || "setup").toString();
+
+          renderParticipants(sessionData);
+          renderPool(sessionData);
+
+          if (sessionData.status === "voting") {
+            navigate("/voting.html");
+          } else if (sessionData.status === "completed") {
+            navigate("/results.html");
+          }
+        }
+
+        async function search() {
+          const q = (queryEl.value || "").trim();
+          if (!q) {
+            showMsg(searchMsg, "Type a movie title to search.", "error");
+            queryEl.focus();
+            return;
+          }
+          showMsg(searchMsg, "", "");
+          setLoading(true);
+          try {
+            const data = await apiFetch("/api/movies/search", {
+              method: "POST",
+              body: { query: q },
+            });
+            renderSearchResults(data?.movies || []);
+          } catch (e) {
+            showMsg(searchMsg, e.message || "Search failed.", "error");
+          } finally {
+            setLoading(false);
+          }
+        }
+
+        searchBtn.addEventListener("click", search);
+        queryEl.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") search();
+        });
+
+        qs("#startVotingBtn")?.addEventListener("click", async () => {
+          showMsg(lobbyError, "", "");
+          setLoading(true);
+          try {
+            await apiFetch(`/api/sessions/${encodeURIComponent(sessionCode)}/status`, {
+              method: "PUT",
+              body: { username, status: "voting" },
+            });
+            navigate("/voting.html");
+          } catch (e) {
+            showMsg(lobbyError, e.message || "Failed to start voting.", "error");
+          } finally {
+            setLoading(false);
+          }
+        });
+
+        // initial + polling
+        let pollId = null;
+        (async () => {
+          try {
+            await refreshSession();
+          } catch (e) {
+            showMsg(lobbyError, e.message || "Failed to load session.", "error");
+          }
+          pollId = window.setInterval(async () => {
+            try {
+              await refreshSession();
+            } catch {
+              // keep polling silently; user may have brief backend hiccup
+            }
+          }, 3000);
+          window.addEventListener("beforeunload", () => pollId && window.clearInterval(pollId));
+        })();
+      })();
+    </script>
+  </body>
+</html>
+

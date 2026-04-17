@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PickFlix — Movie night. Decided fairly.</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="page">
+    <div class="container">
+      <div class="topbar">
+        <div class="logo" aria-label="PickFlix">
+          <div class="logo-mark" aria-hidden="true"></div>
+          <div class="logo-text">PickFlix</div>
+        </div>
+        <div class="badge small">Collaborative voting</div>
+      </div>
+
+      <div class="hero">
+        <h1>Movie night.<br />Decided fairly.</h1>
+        <p class="tagline">
+          Create a session, build a pool together, then rank your top 3. No arguments. Just vibes.
+        </p>
+
+        <div style="height: 16px"></div>
+
+        <div class="panel">
+          <div class="panel-inner">
+            <div class="label">Username</div>
+            <input id="username" class="input" placeholder="e.g. irisle" autocomplete="nickname" />
+
+            <div class="btns">
+              <button id="createBtn" class="btn btn-primary" type="button">
+                Create Session
+              </button>
+              <button id="joinBtn" class="btn btn-outline" type="button">
+                Join Session
+              </button>
+            </div>
+
+            <div id="msg" class="msg hidden"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+      (function () {
+        const { qs, apiFetch, setLoading, showMsg, saveSession, navigate, clearSession, toast } = window.PickFlix;
+
+        const usernameEl = qs("#username");
+        const createBtn = qs("#createBtn");
+        const joinBtn = qs("#joinBtn");
+        const msgEl = qs("#msg");
+
+        // New home screen = fresh start (keeps UX predictable)
+        clearSession();
+
+        function username() {
+          return (usernameEl.value || "").trim();
+        }
+
+        async function createSession() {
+          const u = username();
+          if (!u) {
+            showMsg(msgEl, "Username is required.", "error");
+            usernameEl.focus();
+            return;
+          }
+          showMsg(msgEl, "", "");
+          setLoading(true);
+          try {
+            const data = await apiFetch("/api/sessions/create", {
+              method: "POST",
+              body: { username: u },
+            });
+            const sessionCode = data?.sessionCode || data?.code || data?.session?.code;
+            if (!sessionCode) throw new Error("Missing session code from server.");
+            saveSession({ sessionCode, username: u, isHost: true });
+            toast(`Session ${String(sessionCode).toUpperCase()} created`, "success");
+            navigate("/lobby.html");
+          } catch (e) {
+            showMsg(msgEl, e.message || "Failed to create session.", "error");
+          } finally {
+            setLoading(false);
+          }
+        }
+
+        createBtn.addEventListener("click", createSession);
+        usernameEl.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") createSession();
+        });
+
+        joinBtn.addEventListener("click", () => navigate("/join.html"));
+      })();
+    </script>
+  </body>
+</html>
+
