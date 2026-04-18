@@ -68,6 +68,16 @@ const submitVote = async (req, res) => {
     });
 
     await vote.save();
+    // Auto-complete session if everyone has voted
+const totalVotes = await Vote.countDocuments({
+  sessionCode: sessionCode.toUpperCase()
+});
+
+if (totalVotes >= session.participants.length) {
+  session.status = 'completed';
+  await session.save();
+}
+    
 
     res.status(201).json({ 
       message: 'Vote submitted successfully',
@@ -117,11 +127,6 @@ const getVotes = async (req, res) => {
 const getResults = async (req, res) => {
   try {
     const { code } = req.params;
-
-    // Get the session
-    const session = await Session.findOne({ 
-      code: code.toUpperCase() 
-    });
 
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
