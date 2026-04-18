@@ -128,6 +128,9 @@ const getResults = async (req, res) => {
   try {
     const { code } = req.params;
 
+    const session = await Session.findOne({ 
+  code: code.toUpperCase() 
+});
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
