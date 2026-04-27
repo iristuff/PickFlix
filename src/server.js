@@ -5,6 +5,7 @@ const connectDB = require('./db');
 const sessionRoutes = require('./routes/sessionRoutes');
 const voteRoutes = require('./routes/voteRoutes');
 const movieRoutes = require('./routes/movieRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
@@ -20,6 +21,7 @@ connectDB();
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/votes', voteRoutes);
 app.use('/api/movies', movieRoutes);
+app.use('/api/auth', authRoutes);
 
 // Test route
 app.get('/api/test', (req, res) => {
