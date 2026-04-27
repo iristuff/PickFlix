@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "start": "node src/server.js",
-  "dev": "nodemon src/server.js",
-  "test": "node test.js"
-},
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "node test.js"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -21,6 +21,8 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "firebase": "^12.12.1",
+    "firebase-admin": "^13.8.0",
     "mongoose": "^9.4.1"
   },
   "devDependencies": {
