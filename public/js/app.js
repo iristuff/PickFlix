@@ -34,6 +34,21 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next || {}));
   }
 
+  /**
+   * Save just the username into our local store (without touching session code / host flags).
+   *
+   * Why:
+   * - Guest mode still uses username for sessions.
+   * - Authenticated mode also wants a friendly display name.
+   */
+  function saveUsername(username) {
+    const prev = getStore();
+    setStore({
+      ...prev,
+      username: (username || "").toString(),
+    });
+  }
+
   function getSession() {
     const s = getStore();
     return {
@@ -55,7 +70,9 @@
 
   function clearSession() {
     const prev = getStore();
-    setStore({ ...prev, sessionCode: "", username: "", isHost: false });
+    // We keep username so guest mode remains convenient and
+    // authenticated users still see their saved name on the home screen.
+    setStore({ ...prev, sessionCode: "", isHost: false });
   }
 
   function qs(sel, root = document) {
@@ -169,10 +186,14 @@
     const controller = new AbortController();
     const id = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
+      // If the user is signed in with Firebase, attach the ID token.
+      // This is optional (guest mode still works).
+      const token = await getFirebaseToken().catch(() => "");
       const res = await fetch(url, {
         method,
         headers: {
           ...(body ? { "Content-Type": "application/json" } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...headers,
         },
         body: body ? JSON.stringify(body) : undefined,
@@ -216,6 +237,72 @@
     }, 200);
   }
 
+  // ---------------------------
+  // Firebase Auth helpers
+  // ---------------------------
+  // We use dynamic imports so this file can stay a normal <script> (not type="module").
+  // That keeps existing pages working without changing how they load app.js.
+  let _firebaseLoaded = false;
+  let _firebaseAuthModule = null;
+  let _firebaseConfigModule = null;
+
+  async function loadFirebase() {
+    if (_firebaseLoaded) return { auth: _firebaseConfigModule?.auth, firebaseAuth: _firebaseAuthModule };
+    _firebaseLoaded = true;
+
+    try {
+      // Local module that initializes Firebase and exports `auth`
+      _firebaseConfigModule = await import("/js/firebase-config.js");
+
+      // Firebase Auth SDK functions (sign in/out, onAuthStateChanged, etc.)
+      _firebaseAuthModule = await import("https://www.gstatic.com/firebasejs/10.0.0/firebase-auth.js");
+    } catch (e) {
+      // If Firebase isn't configured yet, we just behave like guest mode.
+      _firebaseConfigModule = null;
+      _firebaseAuthModule = null;
+    }
+
+    return { auth: _firebaseConfigModule?.auth, firebaseAuth: _firebaseAuthModule };
+  }
+
+  /**
+   * getCurrentUser()
+   *
+   * Returns the currently signed-in Firebase user (or null).
+   * Uses onAuthStateChanged so it works even on first page load.
+   */
+  async function getCurrentUser() {
+    const { auth, firebaseAuth } = await loadFirebase();
+    if (!auth || !firebaseAuth?.onAuthStateChanged) return null;
+
+    return await new Promise((resolve) => {
+      const unsubscribe = firebaseAuth.onAuthStateChanged(auth, (user) => {
+        try {
+          unsubscribe();
+        } catch {
+          // ignore
+        }
+        resolve(user || null);
+      });
+    });
+  }
+
+  /**
+   * getFirebaseToken()
+   *
+   * If a user is logged in, returns a Firebase ID token string.
+   * If not logged in (or Firebase isn't configured), returns "".
+   */
+  async function getFirebaseToken() {
+    const { firebaseAuth } = await loadFirebase();
+    const user = await getCurrentUser();
+    if (!user) return "";
+    if (typeof user.getIdToken !== "function") return "";
+
+    // getIdToken() returns a JWT the server can verify with Firebase Admin.
+    return await user.getIdToken();
+  }
+
   window.PickFlix = {
     qs,
     qsa,
@@ -228,9 +315,12 @@
     normalizeMovie,
     getSession,
     saveSession,
+    saveUsername,
     clearSession,
     requireSession,
     navigate,
+    getCurrentUser,
+    getFirebaseToken,
   };
 })();
 

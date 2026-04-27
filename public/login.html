@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PickFlix — Login</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="page">
+    <div class="container">
+      <div class="topbar">
+        <a class="pill" href="/index.html" aria-label="Back to home">← Back</a>
+        <div class="logo" aria-label="PickFlix">
+          <div class="logo-text">Account</div>
+        </div>
+        <div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <h2>Sign in to PickFlix</h2>
+          <p class="small">
+            Accounts are optional — guest mode still works. Logging in just lets you keep a profile and session history.
+          </p>
+
+          <div style="height: 14px"></div>
+
+          <!-- Tabs -->
+          <div class="btns" style="margin-top: 0; align-items: center; justify-content: flex-start">
+            <button id="tabLogin" class="btn btn-primary btn-sm" type="button">Login</button>
+            <button id="tabRegister" class="btn btn-outline btn-sm" type="button">Register</button>
+          </div>
+
+          <div style="height: 12px"></div>
+
+          <!-- Login form -->
+          <div id="loginForm">
+            <div class="label">Email</div>
+            <input id="loginEmail" class="input" type="email" placeholder="you@example.com" autocomplete="email" />
+
+            <div style="height: 12px"></div>
+
+            <div class="label">Password</div>
+            <input
+              id="loginPassword"
+              class="input"
+              type="password"
+              placeholder="••••••••"
+              autocomplete="current-password"
+            />
+
+            <div style="height: 14px"></div>
+
+            <button id="loginBtn" class="btn btn-teal" type="button" style="width: 100%">Login</button>
+          </div>
+
+          <!-- Register form -->
+          <div id="registerForm" class="hidden">
+            <div class="label">Username</div>
+            <input id="regUsername" class="input" placeholder="e.g. ScreenSquad" autocomplete="nickname" />
+
+            <div style="height: 12px"></div>
+
+            <div class="label">Email</div>
+            <input id="regEmail" class="input" type="email" placeholder="you@example.com" autocomplete="email" />
+
+            <div style="height: 12px"></div>
+
+            <div class="label">Password</div>
+            <input
+              id="regPassword"
+              class="input"
+              type="password"
+              placeholder="At least 6 characters"
+              autocomplete="new-password"
+            />
+
+            <div style="height: 14px"></div>
+
+            <button id="registerBtn" class="btn btn-teal" type="button" style="width: 100%">Create account</button>
+          </div>
+
+          <div id="msg" class="msg hidden" role="alert"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <!-- Module script: we can use Firebase modular imports here -->
+    <script type="module">
+      import { auth } from "/js/firebase-config.js";
+      import {
+        createUserWithEmailAndPassword,
+        signInWithEmailAndPassword,
+      } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-auth.js";
+
+      (function () {
+        const { qs, apiFetch, setLoading, showMsg, toast, navigate, saveUsername } = window.PickFlix;
+
+        const tabLogin = qs("#tabLogin");
+        const tabRegister = qs("#tabRegister");
+        const loginForm = qs("#loginForm");
+        const registerForm = qs("#registerForm");
+        const msgEl = qs("#msg");
+
+        const loginEmail = qs("#loginEmail");
+        const loginPassword = qs("#loginPassword");
+        const loginBtn = qs("#loginBtn");
+
+        const regUsername = qs("#regUsername");
+        const regEmail = qs("#regEmail");
+        const regPassword = qs("#regPassword");
+        const registerBtn = qs("#registerBtn");
+
+        function setTab(which) {
+          const isLogin = which === "login";
+          loginForm.classList.toggle("hidden", !isLogin);
+          registerForm.classList.toggle("hidden", isLogin);
+
+          tabLogin.classList.toggle("btn-primary", isLogin);
+          tabLogin.classList.toggle("btn-outline", !isLogin);
+          tabRegister.classList.toggle("btn-primary", !isLogin);
+          tabRegister.classList.toggle("btn-outline", isLogin);
+
+          showMsg(msgEl, "", "");
+        }
+
+        tabLogin.addEventListener("click", () => setTab("login"));
+        tabRegister.addEventListener("click", () => setTab("register"));
+
+        function friendlyFirebaseError(err) {
+          const code = err?.code || "";
+          switch (code) {
+            case "auth/invalid-login-credentials":
+            case "auth/wrong-password":
+              return "Wrong email or password. Try again.";
+            case "auth/user-not-found":
+              return "No account found for that email.";
+            case "auth/email-already-in-use":
+              return "That email is already registered. Try logging in instead.";
+            case "auth/weak-password":
+              return "Password is too weak. Use at least 6 characters.";
+            case "auth/invalid-email":
+              return "That email address doesn’t look valid.";
+            default:
+              return err?.message || "Authentication failed. Please try again.";
+          }
+        }
+
+        async function syncMongoProfile({ usernameForProfile }) {
+          // After Firebase signs you in, you can request an ID token (JWT).
+          // We send that token to our backend so it can:
+          // 1) verify the token (trust it)
+          // 2) create/find the MongoDB user profile tied to the Firebase uid
+          const token = await auth.currentUser.getIdToken();
+          const data = await apiFetch("/api/auth/sync", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: usernameForProfile ? { username: usernameForProfile } : {},
+          });
+          return data?.user;
+        }
+
+        async function onLogin() {
+          const email = (loginEmail.value || "").trim();
+          const password = loginPassword.value || "";
+          if (!email || !password) {
+            showMsg(msgEl, "Email and password are required.", "error");
+            return;
+          }
+
+          showMsg(msgEl, "", "");
+          setLoading(true);
+          loginBtn.classList.add("is-busy");
+          loginBtn.disabled = true;
+          try {
+            await signInWithEmailAndPassword(auth, email, password);
+            const user = await syncMongoProfile({ usernameForProfile: "" });
+
+            // Save username for autofill + UI display
+            if (user?.username) saveUsername(user.username);
+
+            toast("Logged in!", "success");
+            navigate("/index.html");
+          } catch (e) {
+            showMsg(msgEl, friendlyFirebaseError(e), "error");
+          } finally {
+            loginBtn.classList.remove("is-busy");
+            loginBtn.disabled = false;
+            setLoading(false);
+          }
+        }
+
+        async function onRegister() {
+          const username = (regUsername.value || "").trim();
+          const email = (regEmail.value || "").trim();
+          const password = regPassword.value || "";
+          if (!username || !email || !password) {
+            showMsg(msgEl, "Username, email, and password are required.", "error");
+            return;
+          }
+
+          showMsg(msgEl, "", "");
+          setLoading(true);
+          registerBtn.classList.add("is-busy");
+          registerBtn.disabled = true;
+          try {
+            await createUserWithEmailAndPassword(auth, email, password);
+            const user = await syncMongoProfile({ usernameForProfile: username });
+
+            // Save username for autofill + UI display
+            saveUsername(user?.username || username);
+
+            toast("Account created!", "success");
+            navigate("/index.html");
+          } catch (e) {
+            showMsg(msgEl, friendlyFirebaseError(e), "error");
+          } finally {
+            registerBtn.classList.remove("is-busy");
+            registerBtn.disabled = false;
+            setLoading(false);
+          }
+        }
+
+        loginBtn.addEventListener("click", onLogin);
+        registerBtn.addEventListener("click", onRegister);
+
+        // Enter key support
+        [loginEmail, loginPassword].forEach((el) =>
+          el.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter") onLogin();
+          })
+        );
+        [regUsername, regEmail, regPassword].forEach((el) =>
+          el.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter") onRegister();
+          })
+        );
+
+        setTab("login");
+      })();
+    </script>
+  </body>
+</html>
+

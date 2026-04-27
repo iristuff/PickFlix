@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PickFlix — Profile</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800;900&family=Space+Grotesk:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="page">
+    <div class="container">
+      <div class="topbar">
+        <a class="pill" href="/index.html" aria-label="Back to home">← Back</a>
+        <div class="logo" aria-label="PickFlix">
+          <div class="logo-text">Profile</div>
+        </div>
+        <div class="btns" style="margin: 0; justify-content: flex-end">
+          <button id="newSessionBtn" class="btn btn-primary btn-sm" type="button">New Session</button>
+          <button id="logoutBtn" class="btn btn-outline btn-sm" type="button">Logout</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <div class="section-title">
+            <h2 id="hello">Hello</h2>
+            <div class="pill small" id="emailPill">—</div>
+          </div>
+          <p class="small muted">Your past sessions are saved here when you’re logged in.</p>
+
+          <div id="msg" class="msg hidden" role="alert"></div>
+        </div>
+      </div>
+
+      <div style="height: 14px"></div>
+
+      <div class="panel">
+        <div class="panel-inner">
+          <div class="section-title">
+            <h2>Session history</h2>
+            <div class="pill small" id="countPill">0 sessions</div>
+          </div>
+          <div id="history" class="list"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script type="module">
+      import { auth } from "/js/firebase-config.js";
+      import { signOut } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-auth.js";
+
+      (function () {
+        const { qs, apiFetch, setLoading, showMsg, escapeHtml, navigate, saveUsername } = window.PickFlix;
+
+        const hello = qs("#hello");
+        const emailPill = qs("#emailPill");
+        const msgEl = qs("#msg");
+        const historyEl = qs("#history");
+        const countPill = qs("#countPill");
+        const logoutBtn = qs("#logoutBtn");
+        const newSessionBtn = qs("#newSessionBtn");
+
+        function fmtDate(d) {
+          try {
+            return new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+          } catch {
+            return "—";
+          }
+        }
+
+        function renderHistory(items) {
+          const list = Array.isArray(items) ? items.slice().reverse() : [];
+          countPill.textContent = `${list.length} session${list.length === 1 ? "" : "s"}`;
+
+          if (!list.length) {
+            historyEl.innerHTML = `<div class="muted small">No history yet. Play a session to see it here.</div>`;
+            return;
+          }
+
+          historyEl.innerHTML = list
+            .map((h) => {
+              return `
+                <div class="card">
+                  <div class="card-inner">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+                      <div>
+                        <div style="font-weight:900;font-size:1.05rem">${escapeHtml(h.winner || "Winner")}</div>
+                        <div class="muted small" style="margin-top:6px">
+                          ${escapeHtml(fmtDate(h.date))} · ${escapeHtml(String(h.participants || 0))} participant(s) · Code: <span class="mono">${escapeHtml(
+                            String(h.sessionCode || "").toUpperCase()
+                          )}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+        }
+
+        async function boot() {
+          // If not logged in, redirect to login.
+          const user = auth.currentUser;
+          if (!user) {
+            window.location.href = "/login.html";
+            return;
+          }
+
+          emailPill.textContent = user.email || "—";
+
+          setLoading(true);
+          showMsg(msgEl, "", "");
+          try {
+            // apiFetch automatically attaches Firebase token (from public/js/app.js)
+            const data = await apiFetch("/api/auth/profile");
+            const profile = data?.user;
+            if (!profile) throw new Error("Profile not found.");
+
+            hello.textContent = `Hello, ${profile.username || "friend"}`;
+            if (profile.username) saveUsername(profile.username);
+            renderHistory(profile.sessionHistory || []);
+          } catch (e) {
+            showMsg(msgEl, e.message || "Failed to load profile.", "error");
+          } finally {
+            setLoading(false);
+          }
+        }
+
+        logoutBtn.addEventListener("click", async () => {
+          setLoading(true);
+          showMsg(msgEl, "", "");
+          try {
+            await signOut(auth);
+            saveUsername("");
+            navigate("/index.html");
+          } catch (e) {
+            showMsg(msgEl, e.message || "Failed to log out.", "error");
+          } finally {
+            setLoading(false);
+          }
+        });
+
+        newSessionBtn.addEventListener("click", () => navigate("/index.html"));
+
+        // Make sure Firebase has had a chance to hydrate auth state.
+        // (If this is the first load after a refresh, auth.currentUser can be null briefly.)
+        window.PickFlix.getCurrentUser().then((u) => {
+          if (!u) window.location.href = "/login.html";
+          else boot();
+        });
+      })();
+    </script>
+  </body>
+</html>
+

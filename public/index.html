@@ -22,6 +22,7 @@
           <div class="logo-text">PickFlix</div>
         </div>
         <div class="badge small">Collaborative voting</div>
+        <div id="authArea"></div>
       </div>
 
       <div class="hero">
@@ -55,15 +56,34 @@
     <script src="/js/app.js"></script>
     <script>
       (function () {
-        const { qs, apiFetch, setLoading, showMsg, saveSession, navigate, clearSession, toast } = window.PickFlix;
+        const { qs, apiFetch, setLoading, showMsg, saveSession, navigate, clearSession, toast, getSession, getCurrentUser } =
+          window.PickFlix;
 
         const usernameEl = qs("#username");
         const createBtn = qs("#createBtn");
         const joinBtn = qs("#joinBtn");
         const msgEl = qs("#msg");
+        const authArea = qs("#authArea");
 
         // New home screen = fresh start (keeps UX predictable)
         clearSession();
+        // If we have a stored username (guest or authenticated), prefill it.
+        usernameEl.value = getSession().username || "";
+
+        function renderAuthPill({ label, href }) {
+          authArea.innerHTML = `<a class="pill" href="${href}">${label}</a>`;
+        }
+
+        // Auth UI is optional. If Firebase isn't configured yet, this will gracefully fall back.
+        (async () => {
+          const user = await getCurrentUser().catch(() => null);
+          if (user) {
+            const name = getSession().username || (user.email ? user.email.split("@")[0] : "Account");
+            renderAuthPill({ label: `${name} · Profile`, href: "/profile.html" });
+          } else {
+            renderAuthPill({ label: "Login", href: "/login.html" });
+          }
+        })();
 
         function username() {
           return (usernameEl.value || "").trim();
