@@ -299,6 +299,9 @@ a{ color:inherit; text-decoration:none; }
 }
 .msg.hidden{ display:none; }
 
+/* Generic utility: hide any element (used by login/register tabs, etc.) */
+.hidden{ display:none !important; }
+
 .section-title{
   display:flex;
   align-items:center;
