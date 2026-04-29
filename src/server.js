@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const connectDB = require('./db');
 const sessionRoutes = require('./routes/sessionRoutes');
 const voteRoutes = require('./routes/voteRoutes');
@@ -11,8 +12,11 @@ const app = express();
 
 // Middleware
 app.use(cors());
+// Compress JSON + HTML responses (smaller payloads = faster page/API loads)
+app.use(compression());
 app.use(express.json());
-app.use(express.static('public'));
+// Cache static assets in the browser for a bit (safe: filenames are stable in this app)
+app.use(express.static('public', { maxAge: '1h' }));
 
 // Connect to MongoDB
 connectDB();

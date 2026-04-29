@@ -116,7 +116,8 @@ const getSession = async (req, res) => {
   try {
     const { code } = req.params;
 
-    const session = await Session.findOne({ code: code.toUpperCase() });
+    // This endpoint is polled often by clients, so use lean() for faster reads.
+    const session = await Session.findOne({ code: code.toUpperCase() }).lean();
 
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });

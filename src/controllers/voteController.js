@@ -106,14 +106,22 @@ const getVotes = async (req, res) => {
   try {
     const { code } = req.params;
 
-    const votes = await Vote.find({ 
-      sessionCode: code.toUpperCase() 
-    });
+    const sessionCode = code.toUpperCase();
+
+    // Most clients only need the vote count for progress UI.
+    // Counting is much cheaper than returning the full vote list.
+    const totalVotes = await Vote.countDocuments({ sessionCode });
+
+    // Optional: include votes if explicitly requested (useful for debugging).
+    const includeVotes = String(req.query?.includeVotes || '') === '1';
+    const votes = includeVotes
+      ? await Vote.find({ sessionCode }).lean()
+      : undefined;
 
     res.status(200).json({ 
-      sessionCode: code.toUpperCase(),
-      totalVotes: votes.length,
-      votes 
+      sessionCode,
+      totalVotes,
+      ...(includeVotes ? { votes } : {})
     });
 
   } catch (error) {
@@ -128,9 +136,10 @@ const getResults = async (req, res) => {
   try {
     const { code } = req.params;
 
-    const session = await Session.findOne({ 
-  code: code.toUpperCase() 
-});
+    const sessionCode = code.toUpperCase();
+
+    // Read-only paths: lean() is faster and uses less memory.
+    const session = await Session.findOne({ code: sessionCode }).lean();
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
@@ -143,9 +152,7 @@ const getResults = async (req, res) => {
     });
 
     // Get all votes for this session
-    const votes = await Vote.find({ 
-      sessionCode: code.toUpperCase() 
-    });
+    const votes = await Vote.find({ sessionCode }).select('rankings').lean();
 
     // No votes submitted yet
     if (votes.length === 0) {
