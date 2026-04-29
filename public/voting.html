@@ -177,12 +177,16 @@
                 <div class="card clickable" data-movie="${window.PickFlix.escapeHtml(String(m.tmdbId))}">
                   <div class="card-inner">
                     <div class="movie-row" style="grid-template-columns: 64px 1fr;">
-                      <div class="poster">${posterOrPlaceholder(m)}</div>
+                      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+                        <div class="poster">${posterOrPlaceholder(m)}</div>
+                        <div class="muted small" style="font-weight:800;line-height:1;">
+                          ★ ${window.PickFlix.escapeHtml(String(m.rating ?? "—"))}
+                        </div>
+                      </div>
                       <div class="movie-meta">
                         <h3>${window.PickFlix.escapeHtml(m.title)}</h3>
                         <div class="sub">
                           <span class="chip purple">Year: ${window.PickFlix.escapeHtml(m.year || "—")}</span>
-                          <span class="chip yellow">Rating: ${window.PickFlix.escapeHtml(String(m.rating ?? "—"))}</span>
                           <span class="chip js-rank-chip">Tap to rank</span>
                         </div>
                       </div>

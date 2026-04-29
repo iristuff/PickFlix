@@ -38,7 +38,12 @@
           <h2 style="margin-bottom: 12px">🎬 Tonight’s Pick!</h2>
 
           <div class="winner">
-            <div class="winner-poster" id="winnerPoster"></div>
+            <div>
+              <div class="winner-poster" id="winnerPoster"></div>
+              <div id="winnerRating" class="muted small" style="margin-top:10px;font-weight:900;">
+                ★ —
+              </div>
+            </div>
             <div>
               <div class="muted small">Winner</div>
               <h1 id="winnerTitle" style="margin-top: 6px">—</h1>
@@ -102,6 +107,7 @@
         const codeText = qs("#codeText");
         const tieBanner = qs("#tieBanner");
         const winnerPoster = qs("#winnerPoster");
+        const winnerRating = qs("#winnerRating");
         const winnerTitle = qs("#winnerTitle");
         const winnerPoints = qs("#winnerPoints");
         const winnerFirst = qs("#winnerFirst");
@@ -160,6 +166,7 @@
               winnerSecond.textContent = "—";
               winnerThird.textContent = "—";
               winnerPoster.innerHTML = posterOrPlaceholder({ title: "…" });
+              winnerRating.textContent = "★ —";
               tieBanner.classList.add("hidden");
               voteCount.textContent = "—";
               renderScoreboard([]);
@@ -191,6 +198,7 @@
             winnerThird.textContent = winner?.third ?? "—";
 
             winnerPoster.innerHTML = posterOrPlaceholder(winnerMovie || { title: winnerTitle.textContent });
+            winnerRating.textContent = `★ ${window.PickFlix.escapeHtml(String(winnerMovie?.rating ?? "—"))}`;
 
             tieBanner.classList.toggle("hidden", !resultsData?.tieBroken);
             voteCount.textContent = `${Number(resultsData?.totalVotes || 0)} votes`;
