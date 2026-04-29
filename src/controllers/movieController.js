@@ -1,6 +1,51 @@
 const axios = require('axios');
 const Session = require('../models/Session');
 
+/**
+ * Simple in-memory cache for TMDB search results.
+ *
+ * Why caching helps:
+ * - TMDB free tier has a daily request limit.
+ * - Without caching, repeating the same search ("avatar") calls TMDB every time.
+ * - With caching, we reuse recent results for a short time (TTL).
+ *
+ * Notes:
+ * - This cache lives in the Node.js process memory.
+ * - If the server restarts, the cache resets (that's OK for our use case).
+ * - In a multi-server deployment, each server would have its own cache.
+ */
+const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const SEARCH_CACHE_MAX_KEYS = 200;
+
+// Map<normalizedQuery, { movies: Array, expiresAt: number, createdAt: number }>
+const searchCache = new Map();
+
+function normalizeQuery(query) {
+  return String(query || '').trim().toLowerCase();
+}
+
+function cleanupSearchCache(now = Date.now()) {
+  // 1) Remove expired entries
+  for (const [key, entry] of searchCache.entries()) {
+    if (!entry || entry.expiresAt <= now) searchCache.delete(key);
+  }
+
+  // 2) Enforce max keys by removing oldest entries
+  if (searchCache.size <= SEARCH_CACHE_MAX_KEYS) return;
+
+  const entriesByAge = Array.from(searchCache.entries()).sort((a, b) => {
+    const aCreated = Number(a[1]?.createdAt || 0);
+    const bCreated = Number(b[1]?.createdAt || 0);
+    return aCreated - bCreated; // oldest first
+  });
+
+  const extra = searchCache.size - SEARCH_CACHE_MAX_KEYS;
+  for (let i = 0; i < extra; i++) {
+    const k = entriesByAge[i]?.[0];
+    if (k) searchCache.delete(k);
+  }
+}
+
 function buildTmdbAuth() {
   const raw = (process.env.TMDB_API_KEY || '').trim();
   // TMDB v3 API key is typically a 32-char hex string.
@@ -21,6 +66,21 @@ const searchMovies = async (req, res) => {
 
     if (!query) {
       return res.status(400).json({ error: 'Search query is required' });
+    }
+
+    // Cleanup on request: keeps memory bounded without needing a separate timer.
+    const now = Date.now();
+    cleanupSearchCache(now);
+
+    const normalizedQuery = normalizeQuery(query);
+    const cachedEntry = searchCache.get(normalizedQuery);
+    if (cachedEntry && cachedEntry.expiresAt > now) {
+      return res.status(200).json({
+        query,
+        totalResults: cachedEntry.movies.length,
+        movies: cachedEntry.movies,
+        cached: true
+      });
     }
 
     const auth = buildTmdbAuth();
@@ -59,10 +119,22 @@ const searchMovies = async (req, res) => {
       rating: movie.vote_average
     }));
 
+    // Save to cache for 10 minutes.
+    // We cache the formatted movies array so the response stays consistent.
+    searchCache.set(normalizedQuery, {
+      movies,
+      expiresAt: now + SEARCH_CACHE_TTL_MS,
+      createdAt: now
+    });
+
+    // Enforce size after adding (in case this request pushed it over the cap).
+    cleanupSearchCache(now);
+
     res.status(200).json({ 
       query,
       totalResults: movies.length,
-      movies 
+      movies,
+      cached: false
     });
 
   } catch (error) {
