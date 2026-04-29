@@ -135,6 +135,13 @@ const getResults = async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
+    // Build a lookup of TMDB ratings from the session movie pool.
+    // We use the session's stored rating (from TMDB search) rather than trusting the client.
+    const ratingByMovieId = {};
+    (session.movies || []).forEach((m) => {
+      ratingByMovieId[String(m.tmdbId)] = Number(m.rating || 0);
+    });
+
     // Get all votes for this session
     const votes = await Vote.find({ 
       sessionCode: code.toUpperCase() 
@@ -186,12 +193,19 @@ const getResults = async (req, res) => {
     // 1. Most points wins
     // 2. Tie? -> most 1st place votes wins
     // 3. Still tied? -> most 2nd place votes wins
-    // 4. Still tied? -> alphabetical by title
+    // 4. Still tied? -> higher TMDB rating wins (vote_average)
+    // 5. Still tied? -> stable fallback by movieId (so sort is deterministic)
     const sortedResults = Object.values(scores).sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
       if (b.first !== a.first) return b.first - a.first;
       if (b.second !== a.second) return b.second - a.second;
-      return a.title.localeCompare(b.title);
+
+      // TMDB rating tie-breaker
+      const ar = Number(ratingByMovieId[String(a.movieId)] || 0);
+      const br = Number(ratingByMovieId[String(b.movieId)] || 0);
+      if (br !== ar) return br - ar;
+
+      return String(a.movieId).localeCompare(String(b.movieId));
     });
 
     // The winner is the first item after sorting
